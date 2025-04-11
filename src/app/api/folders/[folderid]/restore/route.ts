@@ -1,22 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import pool from '@/lib/db';
-import { verifyToken } from '@/lib/jwt';
+
 
 export async function PATCH(
   req: NextRequest,
   { params }: { params: { folderid: string } }
 ) {
-  const token = req.cookies.get('token')?.value;
-  const folderid = params.folderid;
+    const folderid = params.folderid;
+    const userId = req.headers.get('user-id');
 
-  if (!token) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
-  const payload = await verifyToken(token);
-  if (!payload?.userId) {
-    return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
-  }
+    if (!userId) {
+      return NextResponse.json({ error: 'Unauthorized to restore folders' }, { status: 401 });
+    }
 
   try {
     const result = await pool.query(
@@ -24,7 +19,7 @@ export async function PATCH(
        SET deletedat = NULL 
        WHERE folderid = $1 AND userid = $2 
        RETURNING *`,
-      [folderid, payload.userId]
+      [folderid, userId]
     );
 
     if (result.rowCount === 0) {

@@ -1,7 +1,12 @@
 import pool from '@/lib/db';
-// import { User } from '@/types/user';
-import {User} from '../types/users' 
 
+interface User {
+  id: string;
+  name: string;
+  email: string;
+  password?: string;
+  created_at: string;
+}
 export async function getAllUsers(): Promise<User[]> {
   const res = await pool.query('SELECT id, name, email, created_at FROM users');
   return res.rows;

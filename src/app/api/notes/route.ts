@@ -1,48 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import pool from '@/lib/db';
-import { verifyToken } from '@/lib/jwt';
-
-// ✅ GET Notes for logged-in user
-// export async function GET(req: NextRequest) {
-//   const token = req.cookies.get('token')?.value;
-
-//   if (!token) {
-//     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-//   }
-
-//   const payload = await verifyToken(token);
-//   if (!payload?.userId) {
-//     return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
-//   }
-
-//   try {
-//     const result = await pool.query(
-//       `SELECT 
-//         notes.noteid, notes.title, notes.content, notes.isfavourite, notes.isarchive,
-//         notes.createdat, notes.updatedat, folders.name AS folder_name, folders.folderid
-//       FROM notes
-//       JOIN folders ON notes.folderid = folders.folderid
-//       WHERE notes.userid = $1 AND notes.deletedat IS NULL
-//       ORDER BY notes.createdat DESC`,
-//       [payload.userId]
-//     );
-
-//     return NextResponse.json(result.rows);
-//   } catch (err) {
-//     console.error('GET /notes error:', err);
-//     return NextResponse.json({ error: 'Failed to fetch notes' }, { status: 500 });
-//   }
-// }
 
 
 export async function GET(req: NextRequest) {
-  const token = req.cookies.get('token')?.value;
-  if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const userId = req.headers.get('user-id');
 
-  const payload = await verifyToken(token);
-  if (!payload?.userId) return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
+  if (!userId) {
+    return NextResponse.json({ error: 'Unauthorized to get notes' }, { status: 401 });
+  }
 
-  // Get query params
   const { searchParams } = new URL(req.url);
   const archived = searchParams.get('archived');
   const favorite = searchParams.get('favorite');
@@ -53,9 +19,9 @@ export async function GET(req: NextRequest) {
   const limit = parseInt(searchParams.get('limit') || '10', 10);
   const offset = (page - 1) * limit;
 
-  // Build WHERE conditions
+  
   const conditions = [`notes.userid = $1`];
-  const values: (string|number|boolean)[] = [payload.userId];
+  const values: (string|number|boolean)[] = [userId];
   let i = values.length + 1;
 
   if (archived !== null) {
@@ -71,9 +37,9 @@ export async function GET(req: NextRequest) {
   if (deleted === 'true') {
     conditions.push(`notes.deletedat IS NOT NULL`);
   } 
-  else {
-    conditions.push(`notes.deletedat IS NULL`);
-  }
+  // else {
+  //   conditions.push(`notes.deletedat IS NULL`);
+  // }
 
   if (folderId) {
     conditions.push(`notes.folderid = $${i++}`);
@@ -87,15 +53,21 @@ export async function GET(req: NextRequest) {
   }
 
   const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-
   try {
     const result = await pool.query(
       `
       SELECT 
         notes.noteid, notes.title, notes.content,
         notes.isfavourite, notes.isarchive,
-        notes.createdat, notes.deletedat,notes.updatedat,
-        folders.name AS folder_name, folders.folderid
+        notes.createdat AS note_createdat,
+        notes.updatedat AS note_updatedat,
+        notes.deletedat AS note_deletedat,
+        notes.folderid,
+        folders.folderid AS folder_id,
+        folders.name AS folder_name,
+        folders.createdat AS folder_createdat,
+        folders.updatedat AS folder_updatedat,
+        folders.deletedat AS folder_deletedat
       FROM notes
       JOIN folders ON notes.folderid = folders.folderid
       ${whereClause}
@@ -105,25 +77,58 @@ export async function GET(req: NextRequest) {
       [...values, limit, offset]
     );
 
-    return NextResponse.json(result.rows);
-  } catch (err) {
+    interface NoteRow {
+      noteid: string;
+      title: string;
+      content: string | null;
+      isfavourite: boolean;
+      isarchive: boolean;
+      note_createdat: string;
+      note_updatedat: string;
+      note_deletedat: string | null;
+      folderid: string;
+      folder_id: string;
+      folder_name: string;
+      folder_createdat: string;
+      folder_updatedat: string;
+      folder_deletedat: string | null;
+    }
+
+    const formatted = result.rows.map((row : NoteRow) => ({
+      id: row.noteid,
+      folderId: row.folderid,
+      title: row.title,
+      content: row.content,
+      isFavorite: row.isfavourite,
+      isArchived: row.isarchive,
+      createdAt: row.note_createdat,
+      updatedAt: row.note_updatedat,
+      deletedAt: row.note_deletedat,
+      preview: row.content?.slice(0, 100) || "", 
+      folder: {
+        id: row.folder_id,
+        name: row.folder_name,
+        createdAt: row.folder_createdat,
+        updatedAt: row.folder_updatedat,
+        deletedAt: row.folder_deletedat,
+      },
+    }));
+  
+    return NextResponse.json({ notes: formatted });
+  }
+   
+  catch (err) {
     console.error('GET /notes error:', err);
     return NextResponse.json({ error: 'Failed to fetch notes' }, { status: 500 });
   }
 }
 
 
-// ✅ POST: Create a new note
 export async function POST(req: NextRequest) {
-  const token = req.cookies.get('token')?.value;
+  const userId = req.headers.get('user-id');
 
-  if (!token) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
-  const payload = await verifyToken(token);
-  if (!payload?.userId) {
-    return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
+  if (!userId) {
+    return NextResponse.json({ error: 'Unauthorized to post notes' }, { status: 401 });
   }
 
   try {
@@ -137,7 +142,7 @@ export async function POST(req: NextRequest) {
       `INSERT INTO notes (title, content, folderid, userid)
        VALUES ($1, $2, $3, $4)
        RETURNING *`,
-      [title, content || '', folderid, payload.userId]
+      [title, content || '', folderid, userId]
     );
 
     return NextResponse.json(result.rows[0]);

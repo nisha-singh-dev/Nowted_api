@@ -1,21 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import pool from '@/lib/db';
-import { verifyToken } from '@/lib/jwt';
 
 export async function PATCH(
   req: NextRequest,
   { params }: { params: { noteid: string } }
 ) {
-  const token = req.cookies.get('token')?.value;
   const noteid = params.noteid;
+  const userId = req.headers.get('user-id');
 
-  if (!token) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
-  const payload = await verifyToken(token);
-  if (!payload?.userId) {
-    return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
+  if (!userId) {
+    return NextResponse.json({ error: 'Unauthorized to get particular notes' }, { status: 401 });
   }
 
   try {
@@ -24,13 +18,13 @@ export async function PATCH(
        SET deletedat = NULL 
        WHERE noteid = $1 AND userid = $2 
        RETURNING *`,
-      [noteid, payload.userId]
+      [noteid, userId]
     );
     await pool.query(
       `UPDATE folders 
        SET  deletedat = NULL 
        WHERE folderid = (SELECT folderid FROM notes WHERE noteid = $1) AND userid = $2`,
-      [noteid, payload.userId]  
+      [noteid, userId]  
     )
 
     if (result.rowCount === 0) {

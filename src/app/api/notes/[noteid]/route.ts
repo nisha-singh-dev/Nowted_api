@@ -1,29 +1,67 @@
-// /api/notes/[noteid]/route.ts
-
 import { NextRequest, NextResponse } from 'next/server';
 import pool from '@/lib/db';
-import { verifyToken } from '@/lib/jwt';
 
 export async function GET(
   req: NextRequest,
   { params }: { params: { noteid: string } }  
 ){
-  const token = req.cookies.get('token')?.value;
   const noteid = params.noteid;
-  if(!token){
-    return NextResponse.json({error: "Unauthorized"},{status: 401});
+  const userId = req.headers.get('user-id');
+
+  if (!userId) {
+    return NextResponse.json({ error: 'Unauthorized to get particular notes' }, { status: 401 });
   }
-  const payload = await verifyToken(token);
-  if(!payload?.userId){
-    return NextResponse.json({error: "Invalid token", staus  : 401});
-  }
-  try{
+  try {
     const result = await pool.query(
-      `SELECT * FROM notes
-       WHERE noteid = $1 AND userid = $2 AND deletedat IS NULL`,
-      [noteid, payload.userId]
-    )
-    return NextResponse.json(result.rows[0]);
+      `SELECT 
+         notes.noteid, 
+         notes.title, 
+         notes.content,
+         notes.isfavourite, 
+         notes.isarchive,
+         notes.createdat AS note_createdat,
+         notes.updatedat AS note_updatedat,
+         notes.deletedat AS note_deletedat,
+         notes.folderid,
+         folders.folderid AS folder_id,
+         folders.name AS folder_name,
+         folders.createdat AS folder_createdat,
+         folders.updatedat AS folder_updatedat,
+         folders.deletedat AS folder_deletedat
+       FROM notes
+       JOIN folders ON notes.folderid = folders.folderid
+       WHERE notes.noteid = $1 AND notes.userid = $2 AND notes.deletedat IS NULL`,
+      [noteid, userId]
+    );
+  
+    if (result.rows.length === 0) {
+      return NextResponse.json({ message: 'Note not found' }, { status: 404 });
+    }
+  
+    const row = result.rows[0];
+  
+    const formattedNote = {
+      note: {
+        id: row.noteid, 
+        folderId: row.folderid,
+        title: row.title,
+        content: row.content,
+        isFavorite: row.isfavourite,
+        isArchived: row.isarchive,
+        createdAt: row.note_createdat, 
+        updatedAt: row.note_updatedat,
+        deletedAt: row.note_deletedat,
+        folder: {
+          id: row.folder_id,
+          name: row.folder_name,
+          createdAt: row.folder_createdat,
+          updatedAt: row.folder_updatedat,
+          deletedAt: row.folder_deletedat
+        }
+      }
+    };
+  
+    return NextResponse.json(formattedNote);
   }
   catch(err){
     console.error("GET /notes/:noteid error:", err);
@@ -35,16 +73,11 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: { noteid: string } }
 ) {
-  const token = req.cookies.get('token')?.value;
   const noteid = params.noteid;
+  const userId = req.headers.get('user-id');
 
-  if (!token) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
-  const payload = await verifyToken(token);
-  if (!payload?.userId) {
-    return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
+  if (!userId) {
+    return NextResponse.json({ error: 'Unauthorized to get notes' }, { status: 401 });
   }
 
   const {
@@ -62,7 +95,7 @@ export async function PATCH(
   } = await req.json();
 
   const fields: string[] = [];
-  const values: (string|boolean)[] = [noteid, payload.userId];
+  const values: (string|boolean)[] = [noteid, userId];
   let index = 3;
 
   if (folderId) {
@@ -112,16 +145,11 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: { noteid: string } }
 ) {
-  const token = req.cookies.get('token')?.value;
   const noteid = params.noteid;
+  const userId = req.headers.get('user-id');
 
-  if (!token) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
-  const payload = await verifyToken(token);
-  if (!payload?.userId) {
-    return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
+  if (!userId) {
+    return NextResponse.json({ error: 'Unauthorized to get notes' }, { status: 401 });
   }
 
   try {
@@ -130,7 +158,7 @@ export async function DELETE(
        SET deletedat = NOW() 
        WHERE noteid = $1 AND userid = $2 
        RETURNING *`,
-      [noteid, payload.userId]
+      [noteid, userId]
     );
 
     if (result.rowCount === 0) {
